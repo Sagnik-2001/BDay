@@ -473,8 +473,26 @@
         0 2px 6px rgba(0,0,0,0.15),
         inset 0 1px 0 rgba(255,255,255,0.9);
       transform: rotate(var(--r,-1deg));
-      transition: all 0.4s cubic-bezier(0.34,1.2,0.64,1);
-      position: relative; cursor: pointer;
+      transition: transform 0.35s cubic-bezier(0.34,1.2,0.64,1), box-shadow 0.35s ease, opacity 0.25s ease;
+      position: relative;
+      cursor: grab;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+    .polaroid:active { cursor: grabbing; }
+    .polaroid.dragging {
+      opacity: 0.94;
+      box-shadow: 0 28px 56px rgba(0,0,0,0.55), 0 0 28px rgba(242,196,109,0.5);
+      cursor: grabbing !important;
+      transition: none !important;
+      z-index: 100 !important;
+    }
+    .polaroid.drag-target {
+      outline: 2.5px dashed var(--gold);
+      outline-offset: 4px;
+      transform: scale(0.95) !important;
+      transition: transform 0.2s ease, outline 0.2s ease !important;
     }
     /* reduce tilt angles on mobile to prevent overflow */
     .polaroid:nth-child(2n) { --r:1.5deg; }
@@ -486,8 +504,8 @@
       .polaroid:nth-child(3n) { --r:-3.2deg; }
       .polaroid:nth-child(4n) { --r:1.4deg; }
     }
-    .polaroid:hover, .polaroid:active {
-      transform:rotate(0deg) translateY(-10px) scale(1.06);
+    .polaroid:hover:not(.dragging) {
+      transform:rotate(0deg) translateY(-8px) scale(1.05);
       z-index:5;
       box-shadow: 0 22px 44px rgba(0,0,0,0.42), 0 4px 10px rgba(0,0,0,0.18);
     }
@@ -498,6 +516,7 @@
       width:56px; height:20px;
       border:1px solid rgba(255,255,255,0.5);
       border-radius:2px;
+      pointer-events: none;
     }
     .polaroid:nth-child(1) .tape { background:rgba(242,196,109,0.6); }
     .polaroid:nth-child(2) .tape { background:rgba(217,122,166,0.5); transform:translateX(-50%) rotate(2deg); }
@@ -510,7 +529,10 @@
       display:flex; align-items:center; justify-content:center;
       flex-direction:column; gap:4px;
     }
-    .photo-slot img { width:100%;height:100%;object-fit:cover; }
+    .photo-slot img {
+      width:100%;height:100%;object-fit:cover;
+      pointer-events: none;
+    }
     .polaroid .cap {
       font-family:'Dancing Script',cursive; font-size:clamp(13px,3.5vw,16px);
       color:#2a2018; text-align:center; margin-top:10px; font-weight:700;
@@ -1589,7 +1611,7 @@
           <p class="eyebrow">📸 chapter two</p>
           <h2 class="stage-title">Our fave moments 🥰</h2>
           <p class="sub">
-            Tap any photo to see it bigger, or press the + to drop in a memory of your own!
+            Tap any photo to view, or drag & drop them around to reorder our memories! 📸✨
           </p>
           <div class="gallery-grid" id="galleryGrid"></div>
           <div class="btn-wrap">
@@ -1786,17 +1808,103 @@
 <script>
 // ─── AUDIO ────────────────────────────────────────────────────────────────────
 let actx = null, soundOn = true;
+let activeNotes = [];
 
 function initAudio() {
   if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
   if (actx.state === 'suspended') actx.resume();
 }
 
+function stopHappyBirthday() {
+  activeNotes.forEach(item => {
+    try {
+      item.osc.stop();
+      item.osc.disconnect();
+    } catch(e){}
+  });
+  activeNotes = [];
+}
+
+function playHappyBirthday() {
+  if (!soundOn) return;
+  initAudio();
+  stopHappyBirthday();
+
+  // Frequencies in Hz for Happy Birthday melody in C major
+  const melody = [
+    // Phrase 1: Happy Birthday to You
+    { f: 261.63, d: 0.28 },
+    { f: 261.63, d: 0.18 },
+    { f: 293.66, d: 0.44 },
+    { f: 261.63, d: 0.44 },
+    { f: 349.23, d: 0.44 },
+    { f: 329.63, d: 0.88 },
+    { rest: 0.18 },
+
+    // Phrase 2: Happy Birthday to You
+    { f: 261.63, d: 0.28 },
+    { f: 261.63, d: 0.18 },
+    { f: 293.66, d: 0.44 },
+    { f: 261.63, d: 0.44 },
+    { f: 392.00, d: 0.44 },
+    { f: 349.23, d: 0.88 },
+    { rest: 0.18 },
+
+    // Phrase 3: Happy Birthday Dear Sanchyaita
+    { f: 261.63, d: 0.28 },
+    { f: 261.63, d: 0.18 },
+    { f: 523.25, d: 0.44 },
+    { f: 440.00, d: 0.44 },
+    { f: 349.23, d: 0.44 },
+    { f: 329.63, d: 0.44 },
+    { f: 293.66, d: 0.88 },
+    { rest: 0.18 },
+
+    // Phrase 4: Happy Birthday to You
+    { f: 466.16, d: 0.28 },
+    { f: 466.16, d: 0.18 },
+    { f: 440.00, d: 0.44 },
+    { f: 349.23, d: 0.44 },
+    { f: 392.00, d: 0.44 },
+    { f: 349.23, d: 1.10 }
+  ];
+
+  let now = actx.currentTime + 0.05;
+
+  melody.forEach(note => {
+    if (note.rest) {
+      now += note.rest;
+      return;
+    }
+
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(note.f, now);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.22, now + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + note.d);
+
+    osc.connect(gain);
+    gain.connect(actx.destination);
+
+    osc.start(now);
+    osc.stop(now + note.d);
+
+    activeNotes.push({ osc, gain });
+
+    now += note.d + 0.04;
+  });
+}
+
 document.getElementById('soundBtn').addEventListener('click', () => {
   initAudio(); soundOn = !soundOn;
   document.getElementById('sIcon').textContent = soundOn ? '🎵' : '🔇';
   document.getElementById('sText').textContent = soundOn ? 'Sound' : 'Muted';
-  if (soundOn) playChime();
+  if (!soundOn) stopHappyBirthday();
+  else playHappyBirthday();
 });
 
 function playPop() {
@@ -2147,6 +2255,99 @@ const imgs = [
 const caps = ['magic moments','my favourite','just us two','always ♾'];
 const grid = document.getElementById('galleryGrid');
 
+// Drag and drop logic for gallery polaroids
+let activeCard = null;
+let startX = 0, startY = 0;
+let isDraggingCard = false;
+let draggedOverCard = null;
+
+function makeCardDraggable(card) {
+  card.addEventListener('pointerdown', e => {
+    if (e.button !== undefined && e.button !== 0) return;
+    activeCard = card;
+    startX = e.clientX;
+    startY = e.clientY;
+    isDraggingCard = false;
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+  });
+
+  card.addEventListener('touchstart', e => {
+    // Stop global horizontal swipe while dragging a card
+    e.stopPropagation();
+  }, { passive: true });
+}
+
+function onPointerMove(e) {
+  if (!activeCard) return;
+  const dx = e.clientX - startX;
+  const dy = e.clientY - startY;
+
+  if (!isDraggingCard && Math.hypot(dx, dy) > 6) {
+    isDraggingCard = true;
+    activeCard.classList.add('dragging');
+  }
+
+  if (isDraggingCard) {
+    activeCard.style.transform = `translate3d(${dx}px, ${dy}px, 0) rotate(3deg) scale(1.08)`;
+
+    // Detect target card beneath pointer
+    const elementsUnder = document.elementsFromPoint(e.clientX, e.clientY);
+    const targetCard = elementsUnder.find(el => el && el.classList && el.classList.contains('polaroid') && el !== activeCard);
+
+    document.querySelectorAll('.polaroid').forEach(c => c.classList.remove('drag-target'));
+    if (targetCard) {
+      targetCard.classList.add('drag-target');
+      draggedOverCard = targetCard;
+    } else {
+      draggedOverCard = null;
+    }
+  }
+}
+
+function onPointerUp(e) {
+  window.removeEventListener('pointermove', onPointerMove);
+  window.removeEventListener('pointerup', onPointerUp);
+  window.removeEventListener('pointercancel', onPointerUp);
+
+  if (!activeCard) return;
+
+  if (isDraggingCard) {
+    // Reorder cards when dropped onto target
+    if (draggedOverCard && draggedOverCard !== activeCard) {
+      const cards = Array.from(grid.children);
+      const fromIndex = cards.indexOf(activeCard);
+      const toIndex = cards.indexOf(draggedOverCard);
+
+      if (fromIndex !== -1 && toIndex !== -1) {
+        if (fromIndex < toIndex) {
+          grid.insertBefore(activeCard, draggedOverCard.nextSibling);
+        } else {
+          grid.insertBefore(activeCard, draggedOverCard);
+        }
+      }
+    }
+
+    activeCard.style.transform = '';
+    activeCard.classList.remove('dragging');
+    document.querySelectorAll('.polaroid').forEach(c => c.classList.remove('drag-target'));
+
+    // Prevent lightbox click right after drag completion
+    const preventClick = (evt) => {
+      evt.stopPropagation();
+      evt.preventDefault();
+      window.removeEventListener('click', preventClick, true);
+    };
+    window.addEventListener('click', preventClick, true);
+  }
+
+  activeCard = null;
+  draggedOverCard = null;
+  setTimeout(() => { isDraggingCard = false; }, 50);
+}
+
 caps.forEach((cap,i) => {
   const card = document.createElement('div');
   card.className = 'polaroid';
@@ -2156,10 +2357,14 @@ caps.forEach((cap,i) => {
       <img src="${imgs[i]}" alt="${cap}" id="gi${i}" loading="lazy" draggable="false">
     </div>
     <p class="cap">${cap}</p>`;
-  card.addEventListener('click', () => {
-    const img = document.getElementById('gi'+i);
+
+  card.addEventListener('click', (e) => {
+    if (isDraggingCard) return;
+    const img = card.querySelector('img');
     if (img) openLb(img.src, cap);
   });
+
+  makeCardDraggable(card);
   grid.appendChild(card);
 });
 function openLb(src,cap) {
